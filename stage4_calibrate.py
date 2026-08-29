@@ -4,11 +4,13 @@ import joblib
 from sklearn.base import clone
 from sklearn.calibration import CalibratedClassifierCV
 
-ART = "artifacts"
+SEED = int(os.environ.get("SEED", 10))
+BASE = "artifacts"                               # fixed stage 1-2 inputs (never reseeded)
+ART = os.path.join("artifacts", f"seed_{SEED}")  # per-seed outputs
 os.makedirs(ART, exist_ok=True)
 
 # Reading in the necessary files
-split = joblib.load(os.path.join(ART, "split.joblib"))
+split = joblib.load(os.path.join(BASE, "split.joblib"))
 models = joblib.load(os.path.join(ART, "models.joblib"))
 
 X_train = split["X_train"]

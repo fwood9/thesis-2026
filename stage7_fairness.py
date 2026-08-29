@@ -3,11 +3,13 @@ import numpy as np
 import pandas as pd
 import joblib
 
-ART = "artifacts"
+SEED = int(os.environ.get("SEED", 10))
+BASE = "artifacts"                               # fixed stage 1-2 inputs (never reseeded)
+ART = os.path.join("artifacts", f"seed_{SEED}")  # per-seed outputs
 os.makedirs(ART, exist_ok=True)
 
-df_model = joblib.load(os.path.join(ART, "df_model.joblib"))
-split = joblib.load(os.path.join(ART, "split.joblib"))
+df_model = joblib.load(os.path.join(BASE, "df_model.joblib"))
+split = joblib.load(os.path.join(BASE, "split.joblib"))
 predictions = joblib.load(os.path.join(ART, "predictions.joblib"))
 
 X_test = split["X_test"]

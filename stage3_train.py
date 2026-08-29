@@ -6,11 +6,13 @@ from sklearn.pipeline import Pipeline
 from scipy.stats import randint, uniform, loguniform
 from xgboost import XGBClassifier
 
-ART = "artifacts"
+SEED = int(os.environ.get("SEED", 10))
+BASE = "artifacts"                               # fixed stage 1-2 inputs (never reseeded)
+ART = os.path.join("artifacts", f"seed_{SEED}")  # per-seed outputs
 os.makedirs(ART, exist_ok=True)
 
 # Reading in the necessary files
-split = joblib.load(os.path.join(ART, "split.joblib"))
+split = joblib.load(os.path.join(BASE, "split.joblib"))
 X_train = split["X_train"]
 y_train_ge1 = split["y_train_ge1"]
 y_train_ge2 = split["y_train_ge2"]
@@ -29,7 +31,7 @@ pipe_ge1 = Pipeline(steps=[
         eval_metric='logloss',
         scale_pos_weight=scale_pos_weight_ge1,
         n_jobs=-1,
-        random_state=10,
+        random_state=SEED,
         tree_method='hist',
     )),
 ])
@@ -44,7 +46,7 @@ param_dist_xgb = {
     'clf__reg_lambda': loguniform(1e-2, 10),
 }
 
-cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=10)
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
 
 search_ge1 = RandomizedSearchCV(
     estimator=pipe_ge1,
@@ -54,7 +56,7 @@ search_ge1 = RandomizedSearchCV(
     n_jobs=-1,
     cv=cv,
     verbose=1,
-    random_state=10,
+    random_state=SEED,
 )
 
 search_ge1.fit(X_train, y_train_ge1)
@@ -73,9 +75,8 @@ pipe_ge2 = Pipeline(steps=[
     ('clf', XGBClassifier(
         objective='binary:logistic',
         eval_metric='logloss',
-        scale_pos_weight=scale_pos_weight_ge2,
         n_jobs=-1,
-        random_state=10,
+        random_state=SEED,
         tree_method='hist',
     )),
 ])
@@ -90,7 +91,7 @@ param_dist_xgb = {
     'clf__reg_lambda': loguniform(1e-2, 10),
 }
 
-cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=10)
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
 
 search_ge2 = RandomizedSearchCV(
     estimator=pipe_ge2,
@@ -100,7 +101,7 @@ search_ge2 = RandomizedSearchCV(
     n_jobs=-1,
     cv=cv,
     verbose=1,
-    random_state=10,
+    random_state=SEED,
 )
 
 search_ge2.fit(X_train, y_train_ge2)

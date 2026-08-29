@@ -57,7 +57,7 @@ y = df_model[target].copy()
 X_train, X_test, y_train, y_test = train_test_split(
     X,
     y,
-    test_size=0.2,   # 80/20 split
+    test_size=0.3,   # 70/30 split
     random_state=10,
     stratify=y
 )

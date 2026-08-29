@@ -191,7 +191,7 @@ df["race_Missing"] = race_clean.isna().astype(int)
 df["is_male"] = (df["gender"] == "Male").astype(int)
 df["is_female"] = (df["gender"] == "Female").astype(int)
 
-# Duplicating df to help with future analysis
+# Duplicating df to help with any future analysis needed
 df_model = df.copy()
 
 # Creating the multiclass format
