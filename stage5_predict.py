@@ -6,7 +6,7 @@ import joblib
 from sklearn.metrics import roc_auc_score, classification_report, confusion_matrix, cohen_kappa_score
 
 SEED = int(os.environ.get("SEED", 10))
-BASE = "artifacts"                               # fixed stage 1-2 inputs (never reseeded)
+BASE = "artifacts"  # fixed stage 1-2 inputs (never reseeded)
 ART = os.path.join("artifacts", f"seed_{SEED}")  # per-seed outputs
 os.makedirs(ART, exist_ok=True)
 
@@ -16,6 +16,8 @@ calibrated = joblib.load(os.path.join(ART, "calibrated.joblib"))
 
 X_test = split["X_test"]
 y_test = split["y_test"]
+X_train = split["X_train"]
+y_train = split["y_train"]
 cal_ge1 = calibrated["cal_ge1"]
 cal_ge2 = calibrated["cal_ge2"]
 
@@ -44,16 +46,18 @@ y_pred_ordinal = y_proba_ordinal.argmax(axis=1)
 # Three-way ordinal prediction via cumulative-probability thresholds
 
 y_true = y_test.values
-p1 = p_ge1_test  # P(y >= 1): any readmission
-p2 = p_ge2_test  # P(y >= 2): <30 readmission
+p1 = p_ge1_test
+p2 = p_ge2_test
 
-# Base rates set each operating point
-rate_ge1 = (y_true >= 1).mean()  # ~0.41  (any readmission)
-rate_ge2 = (y_true == 2).mean()  # ~0.09  (<30)
+# The target rates come from the training labels,
+# so no held-out label informs the operating point.
+
+rate_ge1 = (y_train >= 1).mean()  # (any readmission, training prevalence)
+rate_ge2 = (y_train == 2).mean()  # (<30, training prevalence)
 
 t1 = float(np.quantile(p1, 1 - rate_ge1))  # cutoff for ">= >30"
 t2 = float(np.quantile(p2, 1 - rate_ge2))  # cutoff for "<30"
-print(f"thresholds   t1 (>=1): {t1:.3f}   t2 (<30): {t2:.3f}")
+print(f"thresholds (test-ranked, train-rate)   t1 (>=1): {t1:.3f}   t2 (<30): {t2:.3f}")
 
 # Ordinal decision: most-severe threshold that fires wins
 y_pred_3way = np.where(p2 >= t2, 2,

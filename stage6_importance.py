@@ -15,8 +15,9 @@ split = joblib.load(os.path.join(BASE, "split.joblib"))
 calibrated = joblib.load(os.path.join(ART, "calibrated.joblib"))
 predictions = joblib.load(os.path.join(ART, "predictions.joblib"))
 
-X_test = split["X_test"]
-y_test = split["y_test"]
+# Load training data
+X_train = split["X_train"]
+y_train = split["y_train"]
 cal_ge1 = calibrated["cal_ge1"]
 cal_ge2 = calibrated["cal_ge2"]
 t1 = predictions["t1"]
@@ -69,10 +70,11 @@ class FrankHallOrdinalClassifier:
 # Reuse the SAME base-rate thresholds computed in the 3-way decoding cell
 combined_model = FrankHallOrdinalClassifier(cal_ge1, cal_ge2, t1=t1, t2=t2)
 
+# Pass X_train and y_train into permutation_importance
 perm_result = permutation_importance(
     combined_model,
-    X_test,
-    y_test,
+    X_train,
+    y_train,
     n_repeats=5,
     random_state=SEED,
     n_jobs=-1,
@@ -80,7 +82,7 @@ perm_result = permutation_importance(
 
 overall_importance = (
     pd.DataFrame({
-        "feature": X_test.columns,
+        "feature": X_train.columns,
         "importance_mean": perm_result.importances_mean,
         "importance_std": perm_result.importances_std,
     })
@@ -90,9 +92,9 @@ overall_importance = (
 
 overall_importance.to_csv(os.path.join(ART, "overall_importance.csv"), index=False)
 
-# Permutation importance of the race identifiers for the 3-way model
-race_features = [c for c in X_test.columns if c.startswith("race_")]
-race_idx = [list(X_test.columns).index(c) for c in race_features]
+# Derive race columns and indices from X_train
+race_features = [c for c in X_train.columns if c.startswith("race_")]
+race_idx = [list(X_train.columns).index(c) for c in race_features]
 
 race_importance = (
     pd.DataFrame({
@@ -112,10 +114,11 @@ def lt30_ap_scorer(estimator, X, y):
     return average_precision_score((np.asarray(y) == 2).astype(int), p2)
 
 
+# Pass X_train and y_train to calculate early readmission importance
 perm_lt30 = permutation_importance(
     cal_ge2,
-    X_test,
-    y_test,
+    X_train,
+    y_train,
     scoring=lt30_ap_scorer,
     n_repeats=10,
     random_state=SEED,
@@ -124,7 +127,7 @@ perm_lt30 = permutation_importance(
 
 lt30_importance = (
     pd.DataFrame({
-        'feature': X_test.columns,
+        'feature': X_train.columns,
         'importance_mean': perm_lt30.importances_mean,
         'importance_std': perm_lt30.importances_std,
     })
