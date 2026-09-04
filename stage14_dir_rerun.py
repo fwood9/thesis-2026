@@ -18,6 +18,7 @@ from scipy.stats import randint, uniform, loguniform
 from xgboost import XGBClassifier
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -25,22 +26,22 @@ from matplotlib.ticker import ScalarFormatter, FixedLocator, NullLocator
 import statsmodels.formula.api as smf
 
 SEED = int(os.environ.get("SEED", 10))
-BASE = "artifacts"                               # fixed stage 1-2 inputs (never reseeded)
+BASE = "artifacts"  # fixed stage 1-2 inputs (never reseeded)
 ART = os.path.join("artifacts", f"seed_{SEED}")  # per-seed outputs
 os.makedirs(ART, exist_ok=True)
 
-REPAIR_LEVEL = 0.75   # 0 = no repair, 1 = full repair. Lower it to trade fairness for accuracy.
+REPAIR_LEVEL = 0.75  # 0 = no repair, 1 = full repair. Lower it to trade fairness for accuracy.
 DIR_FEATURES = [
     "discharged_to_another_facility",
-    "number_inpatient",
-    "sum_emergency_and_inpatient",
-  #  "age_numeric",
-  #  "number_diagnoses",
-    "total_visits",
-   # "number_outpatient",
-   # "number_emergency",
-   # "admitted_from_er",
-   # "diabetes_med_count"
+    #"number_inpatient",
+    "num_medications",
+    #  "age_numeric",
+      "number_diagnoses",
+  #  "total_procedures",
+     "num_lab_procedures",
+    # "medical_burden",
+    # "admitted_from_er",
+    # "time_in_hospital"
 ]
 
 # Reading in the necessary files
@@ -48,7 +49,7 @@ split = joblib.load(os.path.join(BASE, "split.joblib"))
 df_model = joblib.load(os.path.join(BASE, "df_model.joblib"))
 X_train = split["X_train"].copy()
 X_test = split["X_test"].copy()
-y_train = split["y_train"]          # multiclass: 0=NO, 1=>30, 2=<30
+y_train = split["y_train"]  # multiclass: 0=NO, 1=>30, 2=<30
 y_test = split["y_test"]
 numeric_cols = split["numeric_cols"]
 categorical_cols = split["categorical_cols"]
@@ -62,7 +63,6 @@ race_test = df_model.loc[X_test.index, "race"].fillna("Missing").astype(str)
 
 class DisparateImpactRemover:
 
-
     def __init__(self, repair_level=1.0, n_quantiles=101):
         self.lam = float(repair_level)
         self.qs = np.linspace(0, 1, n_quantiles)
@@ -74,7 +74,7 @@ class DisparateImpactRemover:
         self.gq_ = {}
         for g in self.groups_:
             gq = np.quantile(values[groups == g], self.qs)
-            gq = np.maximum.accumulate(gq)                    # enforce monotone
+            gq = np.maximum.accumulate(gq)  # enforce monotone
             gq = gq + np.arange(len(gq)) * 1e-9
             self.gq_[g] = gq
         self.target_ = np.median(np.vstack([self.gq_[g] for g in self.groups_]), axis=0)
@@ -89,8 +89,8 @@ class DisparateImpactRemover:
             if not mask.any():
                 continue
             v = values[mask]
-            ranks = np.interp(v, self.gq_[g], self.qs)        # value  within-group quantile
-            tv = np.interp(ranks, self.qs, self.target_)      # quantile  target value
+            ranks = np.interp(v, self.gq_[g], self.qs)  # value  within-group quantile
+            tv = np.interp(ranks, self.qs, self.target_)  # quantile  target value
             out[mask] = (1 - self.lam) * v + self.lam * tv
         return out
 
@@ -101,9 +101,10 @@ for f in DIR_FEATURES:
     xtr = pd.to_numeric(X_train[f], errors="coerce")
     xte = pd.to_numeric(X_test[f], errors="coerce")
     med = xtr.median()
-    xtr = xtr.fillna(med); xte = xte.fillna(med)
+    xtr = xtr.fillna(med);
+    xte = xte.fillna(med)
     dir_ = DisparateImpactRemover(repair_level=REPAIR_LEVEL).fit(xtr.values, race_train.values)
-    # report back how much of the race gap the repair removes
+    # report back how much of the race gap the repair removes for AA and CAucasian
     before = xtr[race_train.values == "AfricanAmerican"].mean() - xtr[race_train.values == "Caucasian"].mean()
     rep_tr = dir_.transform(xtr.values, race_train.values)
     after = rep_tr[race_train.values == "AfricanAmerican"].mean() - rep_tr[race_train.values == "Caucasian"].mean()
@@ -111,9 +112,8 @@ for f in DIR_FEATURES:
     X_test[f] = dir_.transform(xte.values, race_test.values)
     print(f"  {f:32s} AA-Caucasian mean gap: {before:+.4f} -> {after:+.4f}")
 
-
 # Drop race_* from the model inputs which it has in common with the fair model
-# This ensure a fair comparison to Fair-SMOTE-NC and Fair-CTAB-GAN
+# This ensure a fair comparison
 
 sensitive_feats = [c for c in X_train.columns if c.startswith("race_")]
 print("Dropping sensitive model features:", sensitive_feats)
@@ -135,8 +135,8 @@ preprocess = ColumnTransformer(transformers=[
 
 # Cumulative binary targets (class imbalance via scale_pos_weight)
 
-y_train_ge1 = (y_train >= 1).astype(int)   # readmitted at all
-y_train_ge2 = (y_train >= 2).astype(int)   # readmitted <30
+y_train_ge1 = (y_train >= 1).astype(int)  # readmitted at all
+y_train_ge2 = (y_train >= 2).astype(int)  # readmitted <30
 
 param_dist_xgb = {
     'clf__n_estimators': randint(200, 700),
@@ -184,7 +184,6 @@ cal_ge1.fit(X_train, y_train_ge1)
 cal_ge2.fit(X_train, y_train_ge2)
 joblib.dump({"cal_ge1": cal_ge1, "cal_ge2": cal_ge2}, os.path.join(ART, "calibrated_dir.joblib"))
 
-
 # Predict on the untouched test set using the same metrics
 p_ge1_test = cal_ge1.predict_proba(X_test)[:, 1]
 p_ge2_test = cal_ge2.predict_proba(X_test)[:, 1]
@@ -198,11 +197,15 @@ y_proba_ordinal = y_proba_ordinal / y_proba_ordinal.sum(axis=1, keepdims=True)
 y_pred_ordinal = y_proba_ordinal.argmax(axis=1)
 
 y_true = y_test.values
-rate_ge1 = (y_true >= 1).mean()
-rate_ge2 = (y_true == 2).mean()
+
+# The target rates come from the training labels,
+# so no held-out label informs the operating point.
+
+rate_ge1 = (y_train >= 1).mean()
+rate_ge2 = (y_train == 2).mean()
 t1 = float(np.quantile(p_ge1_test, 1 - rate_ge1))
 t2 = float(np.quantile(p_ge2_test, 1 - rate_ge2))
-print(f"thresholds   t1 (>=1): {t1:.3f}   t2 (<30): {t2:.3f}")
+print(f"thresholds (test-ranked, train-rate)   t1 (>=1): {t1:.3f}   t2 (<30): {t2:.3f}")
 y_pred_3way = np.where(p_ge2_test >= t2, 2, np.where(p_ge1_test >= t1, 1, 0))
 
 print("\npredicted distribution:", np.round(np.bincount(y_pred_3way, minlength=3) / len(y_true), 3))
@@ -225,50 +228,6 @@ joblib.dump({
     "y_pred_3way": y_pred_3way, "t1": t1, "t2": t2,
 }, os.path.join(ART, "predictions_dir.joblib"))
 
-# Permutation importance of the DIR model
-
-class FrankHallOrdinalClassifier:
-    def __init__(self, model_ge1, model_ge2, t1=0.5, t2=0.5):
-        self.model_ge1 = model_ge1; self.model_ge2 = model_ge2
-        self.t1 = t1; self.t2 = t2
-
-    def fit(self, X, y=None):
-        return self
-
-    def _cumulative(self, X):
-        return self.model_ge1.predict_proba(X)[:, 1], self.model_ge2.predict_proba(X)[:, 1]
-
-    def predict_proba(self, X):
-        p1, p2 = self._cumulative(X)
-        proba = np.clip(np.vstack([1 - p1, p1 - p2, p2]).T, 0, None)
-        return proba / proba.sum(axis=1, keepdims=True)
-
-    def predict(self, X):
-        p1, p2 = self._cumulative(X)
-        return np.where(p2 >= self.t2, 2, np.where(p1 >= self.t1, 1, 0))
-
-    def get_params(self, deep=True):
-        return {"model_ge1": self.model_ge1, "model_ge2": self.model_ge2, "t1": self.t1, "t2": self.t2}
-
-    def set_params(self, **p):
-        for k, v in p.items():
-            setattr(self, k, v)
-        return self
-
-    def score(self, X, y):
-        return cohen_kappa_score(y, self.predict(X), weights="quadratic")
-
-
-combined_model = FrankHallOrdinalClassifier(cal_ge1, cal_ge2, t1=t1, t2=t2)
-perm_result = permutation_importance(combined_model, X_test, y_test, n_repeats=5, random_state=SEED, n_jobs=-1)
-overall_importance = (pd.DataFrame({
-    "feature": X_test.columns, "importance_mean": perm_result.importances_mean,
-    "importance_std": perm_result.importances_std,
-}).sort_values("importance_mean", ascending=False).reset_index(drop=True))
-overall_importance.to_csv(os.path.join(ART, "overall_importance_dir.csv"), index=False)
-print("\ntop 10 features (DIR model):")
-print(overall_importance.head(10).round(4).to_string(index=False))
-
 
 # Fairness audits
 
@@ -290,8 +249,10 @@ audit["race_age"] = audit["race"] + "_" + audit["age"].astype(str)
 def class_metrics(sub, cls):
     yt = (sub["y_true"] == cls).astype(int).values
     yp = (sub["y_pred"] == cls).astype(int).values
-    tp = int(((yp == 1) & (yt == 1)).sum()); fp = int(((yp == 1) & (yt == 0)).sum())
-    tn = int(((yp == 0) & (yt == 0)).sum()); fn = int(((yp == 0) & (yt == 1)).sum())
+    tp = int(((yp == 1) & (yt == 1)).sum());
+    fp = int(((yp == 1) & (yt == 0)).sum())
+    tn = int(((yp == 0) & (yt == 0)).sum());
+    fn = int(((yp == 0) & (yt == 1)).sum())
     P, N, n = tp + fn, tn + fp, len(sub)
     d = lambda a, b: a / b if b else np.nan
     base, sel = d(P, n), d(tp + fp, n)
@@ -305,7 +266,9 @@ def fairness_by(attr, min_n=50):
         if len(sub) < min_n:
             continue
         for cls in [0, 1, 2]:
-            m = class_metrics(sub, cls); m[attr] = g; m["class"] = class_names[cls]
+            m = class_metrics(sub, cls);
+            m[attr] = g;
+            m["class"] = class_names[cls]
             rows.append(m)
     cols = [attr, "class", "n", "base_rate", "sel_rate", "flag_ratio", "TPR", "FPR", "PPV"]
     return pd.DataFrame(rows)[cols]
@@ -316,7 +279,6 @@ for attr in ["race", "gender", "age", "race_age"]:
     print(f"\n===== three-way fairness by {attr} (DIR model) =====")
     print(result)
     result.to_csv(os.path.join(ART, f"fairness_{attr}_dir.csv"), index=False)
-
 
 # Logits + forest plot
 
@@ -356,7 +318,7 @@ fit_and_report("flagged_ge1")
 fit_and_report("flagged_lt30")
 
 classes = {0: "NO", 1: ">30", 2: "<30"}
-TEAL    = {"NO": "#80CBC4", ">30": "#26A69A", "<30": "#00695C"}  # light -> dark
+TEAL = {"NO": "#80CBC4", ">30": "#26A69A", "<30": "#00695C"}  # light -> dark
 offsets = {"NO": 0.24, ">30": 0.0, "<30": -0.24}
 results = {}
 for k, name in classes.items():
@@ -374,9 +336,9 @@ race_counts = d_logit["race"].value_counts()
 races = [r for r in race_counts.index if r != REFERENCE_RACE and r in results["<30"].index]
 
 fig, ax = plt.subplots(figsize=(8, 5))
-ax.axvspan(0.8, 1.25, color="grey", alpha=0.08, zorder=0)          # negligible band
+ax.axvspan(0.8, 1.25, color="grey", alpha=0.08, zorder=0)  # negligible band
 for yi in range(len(races)):
-    ax.axhline(yi, color="0.9", lw=0.8, zorder=0)                  # row guides
+    ax.axhline(yi, color="0.9", lw=0.8, zorder=0)  # row guides
 
 for name in classes.values():
     t = results[name].reindex(races)
@@ -389,7 +351,7 @@ for name in classes.values():
 
 ax.axvline(1.0, color="black", ls="--", lw=1, zorder=1)
 ax.set_xscale("log")
-ax.set_xlim(0.2, 5.0)                                             # fixed, identical on every plot
+ax.set_xlim(0.2, 5.0)  # fixed, identical on every plot
 ax.xaxis.set_major_locator(FixedLocator([0.2, 0.5, 1.0, 2.0, 5.0]))
 ax.xaxis.set_major_formatter(ScalarFormatter())
 ax.xaxis.set_minor_locator(NullLocator())
