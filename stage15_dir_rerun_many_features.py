@@ -33,15 +33,15 @@ os.makedirs(ART, exist_ok=True)
 REPAIR_LEVEL = 0.75  # 0 = no repair, 1 = full repair. Lower it to trade fairness for accuracy.
 DIR_FEATURES = [
     "discharged_to_another_facility",
-    #"number_inpatient",
+    "number_inpatient",
     "num_medications",
-    #  "age_numeric",
-      "number_diagnoses",
-  #  "total_procedures",
+    "age_numeric",
+    "number_diagnoses",
+    "total_procedures",
      "num_lab_procedures",
-    # "medical_burden",
-    # "admitted_from_er",
-    # "time_in_hospital"
+     "medical_burden",
+     "admitted_from_er",
+     "time_in_hospital"
 ]
 
 # Reading in the necessary files
@@ -89,8 +89,8 @@ class DisparateImpactRemover:
             if not mask.any():
                 continue
             v = values[mask]
-            ranks = np.interp(v, self.gq_[g], self.qs)  # value  within-group quantile
-            tv = np.interp(ranks, self.qs, self.target_)  # quantile  target value
+            ranks = np.interp(v, self.gq_[g], self.qs)  # value = within-group quantile
+            tv = np.interp(ranks, self.qs, self.target_)  # quantile = target value
             out[mask] = (1 - self.lam) * v + self.lam * tv
         return out
 
@@ -104,7 +104,7 @@ for f in DIR_FEATURES:
     xtr = xtr.fillna(med);
     xte = xte.fillna(med)
     dir_ = DisparateImpactRemover(repair_level=REPAIR_LEVEL).fit(xtr.values, race_train.values)
-    # report back how much of the race gap the repair removes for AA and CAucasian
+    # report back how much of the race gap the repair removes AA vs CAucasian
     before = xtr[race_train.values == "AfricanAmerican"].mean() - xtr[race_train.values == "Caucasian"].mean()
     rep_tr = dir_.transform(xtr.values, race_train.values)
     after = rep_tr[race_train.values == "AfricanAmerican"].mean() - rep_tr[race_train.values == "Caucasian"].mean()
@@ -175,14 +175,14 @@ def train_head(y_bin, scoring, label):
 
 best_ge1 = train_head(y_train_ge1, 'roc_auc', 'Model 1 (y>=1)')
 best_ge2 = train_head(y_train_ge2, 'average_precision', 'Model 2 (y>=2)')
-joblib.dump({"best_ge1": best_ge1, "best_ge2": best_ge2}, os.path.join(ART, "models_dir.joblib"))
+joblib.dump({"best_ge1": best_ge1, "best_ge2": best_ge2}, os.path.join(ART, "models_DIR_Many.joblib"))
 
 # Calibration
 cal_ge1 = CalibratedClassifierCV(clone(best_ge1), method='isotonic', cv=5)
 cal_ge2 = CalibratedClassifierCV(clone(best_ge2), method='isotonic', cv=5)
 cal_ge1.fit(X_train, y_train_ge1)
 cal_ge2.fit(X_train, y_train_ge2)
-joblib.dump({"cal_ge1": cal_ge1, "cal_ge2": cal_ge2}, os.path.join(ART, "calibrated_dir.joblib"))
+joblib.dump({"cal_ge1": cal_ge1, "cal_ge2": cal_ge2}, os.path.join(ART, "calibrated_DIR_Many.joblib"))
 
 # Predict on the untouched test set using the same metrics
 p_ge1_test = cal_ge1.predict_proba(X_test)[:, 1]
@@ -215,7 +215,7 @@ print(classification_report(y_true, y_pred_3way, digits=3, target_names=["NO", "
 cm_3way = pd.DataFrame(confusion_matrix(y_true, y_pred_3way),
                        index=["NO", ">30", "<30"], columns=["NO", ">30", "<30"])
 print(cm_3way)
-cm_3way.to_csv(os.path.join(ART, "confusion_matrix_3way_dir.csv"))
+cm_3way.to_csv(os.path.join(ART, "confusion_matrix_3way_DIR_Many.csv"))
 print("Quadratic weighted kappa:", round(cohen_kappa_score(y_true, y_pred_3way, weights="quadratic"), 3))
 
 roc_auc_ordinal = roc_auc_score(y_test, y_proba_ordinal, multi_class="ovr", average="weighted")
@@ -226,8 +226,7 @@ joblib.dump({
     "p_ge1_test": p_ge1_test, "p_ge2_test": p_ge2_test,
     "y_proba_ordinal": y_proba_ordinal, "y_pred_ordinal": y_pred_ordinal,
     "y_pred_3way": y_pred_3way, "t1": t1, "t2": t2,
-}, os.path.join(ART, "predictions_dir.joblib"))
-
+}, os.path.join(ART, "predictions_DIR_Many.joblib"))
 
 # Fairness audits
 
@@ -276,9 +275,9 @@ def fairness_by(attr, min_n=50):
 
 for attr in ["race", "gender", "age", "race_age"]:
     result = fairness_by(attr).round(3)
-    print(f"\n===== three-way fairness by {attr} (DIR model) =====")
+    print(f"\n===== three-way fairness by {attr} (DIR Many-Feature model) =====")
     print(result)
-    result.to_csv(os.path.join(ART, f"fairness_{attr}_dir.csv"), index=False)
+    result.to_csv(os.path.join(ART, f"fairness_{attr}_DIR_Many.csv"), index=False)
 
 # Logits + forest plot
 
@@ -310,7 +309,7 @@ def fit_and_report(outcome):
     table = tidy_logit(res)
     print(f"\n===== {outcome} ~ race (unadjusted, DIR model) =====")
     print(table[table["term"].str.startswith("race[")].round(4).to_string(index=False))
-    table.to_csv(os.path.join(ART, f"logit_{outcome}_dir.csv"), index=False)
+    table.to_csv(os.path.join(ART, f"logit_{outcome}_DIR_Many.csv"), index=False)
     return table
 
 
@@ -359,7 +358,7 @@ ax.set_yticks(range(len(races)))
 ax.set_yticklabels(races)
 ax.set_ylim(-0.6, len(races) - 0.4)
 ax.set_xlabel("Odds ratio vs Caucasian (log scale)")
-ax.set_title("Race allocation bias by predicted outcome (DIR model)")
+ax.set_title("Race allocation bias by predicted outcome (DIR Many-Feature model)")
 ax.grid(axis="x", ls=":", alpha=0.4)
 
 handles = [Line2D([0], [0], color=TEAL[n], lw=2.4, marker="o", label=n)
@@ -368,5 +367,5 @@ ax.legend(handles=handles, title="Predicted outcome", loc="upper left",
           bbox_to_anchor=(1.02, 1), frameon=False)
 
 plt.tight_layout()
-plt.savefig(os.path.join(ART, "logit_forest_3way_dir.png"), dpi=200, bbox_inches="tight")
-print("\nsaved", os.path.join(ART, "logit_forest_3way_dir.png"))
+plt.savefig(os.path.join(ART, "logit_forest_3way_DIR_Many.png"), dpi=200, bbox_inches="tight")
+print("\nsaved", os.path.join(ART, "logit_forest_3way_DIR_Many.png"))
